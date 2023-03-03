@@ -1,0 +1,243 @@
+Parameters:
+  DomainName:
+    Type: String
+    Description: "Enter the custom domain name to be used."
+  ServerNamePrefix:
+    Type: String
+    Description: "Enter the prefix for the custom server names."
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: "Select the AWS key to be used for SSH access to the instances."
+  DomainAdminUserName:
+    Type: String
+    Description: "Enter the username for the domain administrator account."
+    Default: "Administrator"
+  DomainAdminPassword:
+    Type: String
+    Description: "Enter the password for the domain administrator account."
+    NoEcho: True
+  User1Name:
+    Type: String
+    Description: "Enter the username for the first domain user."
+  User1Password:
+    Type: String
+    Description: "Enter the password for the first domain user."
+    NoEcho: True
+  User2Name:
+    Type: String
+    Description: "Enter the username for the second domain user."
+  User2Password:
+    Type: String
+    Description: "Enter the password for the second domain user."
+    NoEcho: True
+
+Resources:
+  DomainController:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0c55b159cbfafe1f0 # Windows Server 2019 Base
+      InstanceType: t3.large
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServerNamePrefix}-DC"
+      UserData:
+        Fn::Base64: !Sub |
+          <powershell>
+          $domainName = "${DomainName}"
+          $adminUserName = "${DomainAdminUserName}"
+          $adminPassword = "${DomainAdminPassword}"
+          # Install Active Directory Domain Services
+          Install-WindowsFeature AD-Domain-Services -IncludeManagementTools
+          # Install DNS Server
+          Install-WindowsFeature DNS -IncludeManagementTools
+          # Configure Active Directory Domain Services
+          Install-ADDSForest -DomainName $domainName -SafeModeAdministratorPassword (ConvertTo-SecureString $adminPassword -AsPlainText -Force) -DatabasePath "C:\\Windows\\NTDS" -LogPath "C:\\Windows\\NTDS" -SysvolPath "C:\\Windows\\SYSVOL" -Force -InstallDns
+          # Set the DNS Server to loopback address
+          Set-DnsClientServerAddress -InterfaceAlias Ethernet -ServerAddresses ("127.0.0.1")
+          # Create the first domain user
+          $user1Name = "${User1Name}"
+          $user1Password = "${User1Password}"
+          New-ADUser -Name $user1Name -AccountPassword (ConvertTo-SecureString $user1Password -AsPlainText -Force) -Enabled $true -PasswordNeverExpires $true -Path "OU=Users,DC=$domainName" -SamAccountName $user1Name
+          # Create the second domain user
+          $user2Name = "${User2Name}"
+          $user2Password = "${User2Password}"
+          New-ADUser -Name $user2Name -AccountPassword (ConvertTo-SecureString $user2Password -AsPlainText -Force) -Enabled $true -PasswordNeverExpires $true -Path "OU=Users,DC=$domainName" -SamAccountName $user2Name
+          </powershell>
+
+  DomainJoinedServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0c55b159cbfafe1f0 # Windows Server 2019 Base
+      InstanceType: t3.large
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServerNamePrefix}-DJ"
+      UserData:
+        Fn::Base64: !Sub |
+          <powershell>
+          $domainName = "${DomainName}"
+          $adminUserName = "${DomainAdminUserName}"
+          $adminPassword = "${DomainAdminPassword}"
+          $user1Name = "${User1Name}"
+          $user1Password = "${User1Password}"
+          $user2Name = "${User2Name}"
+          $user2Password = "${User2Password}"
+          # Join the instance to the domain
+          Add-Computer -DomainName $domainName -Credential (New-Object System.Management.Automation.PSCredential ($adminUserName, (ConvertTo-SecureString $adminPassword -AsPlainText -Force))) -Restart
+          # Create the first domain user profile
+          $user1ProfilePath = "\\${domainName}\Users\$user1Name"
+          $user1ProfileFolderPath = "C:\Users\$user1Name"
+          $user1ProfileFolderPathACL = (Get-Acl $user1ProfileFolderPath).Access
+          $user1ProfileFolderPathACL += (New-Object System.Security.AccessControl.FileSystemAccessRule("$user1Name`$","ReadAndExecute","Allow"))
+          $user1ProfileFolderPathACL += (New-Object System.Security.AccessControl.FileSystemAccessRule("Administrators","FullControl","Allow"))
+          $user1ProfileFolderPathACL += (New-Object System.Security.AccessControl.FileSystemAccessRule("SYSTEM","FullControl","Allow"))
+          $user1ProfileFolderPathACL += (New-Object System.Security.AccessControl.FileSystemAccessRule("CREATOR OWNER","FullControl","Allow"))
+          $user1ProfileFolderPathACL.SetAccessRuleProtection($false,$false)
+          $user1ProfileFolderPathACL | Set-Acl $user1ProfileFolderPath
+          New-Item -ItemType Directory -Path $user1ProfilePath -Force
+          # Create the second domain user profile
+          $user2ProfilePath = "\\${domainName}\Users\$user2Name"
+          $user2ProfileFolderPath = "C:\Users\$user2Name"
+          $user2ProfileFolderPathACL = (Get-Acl $user2ProfileFolderPath).Access
+          $user2ProfileFolderPathACL += (New-Object System.Security.AccessControl.FileSystemAccessRule("$user2Name`$","ReadAndExecute","Allow"))
+          $user2ProfileFolderPathACL += (New-Object System.Security.AccessControl.FileSystemAccessRule("Administrators","FullControl","Allow"))
+          $user2ProfileFolderPathACL += (New-Object System.Security.AccessControl.FileSystemAccessRule("SYSTEM","FullControl","Allow"))
+          $user2ProfileFolderPathACL += (New-Object System.Security.AccessControl.FileSystemAccessRule("CREATOR OWNER","FullControl","Allow"))
+          $user2ProfileFolderPathACL.SetAccessRuleProtection($false,$false)
+          $user2ProfileFolderPathACL | Set-Acl $user2ProfileFolderPath
+          New-Item -ItemType Directory -Path $user2ProfilePath -Force
+          </powershell>
+
+  WSFCNode1:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0c55b159cbfafe1f0 # Windows Server 2019 Base
+      InstanceType: t3.large
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServerNamePrefix}-WSFC1"
+      UserData:
+        Fn::Base64: !Sub |
+          <powershell>
+          $domainName = "${DomainName}"
+          $adminUserName = "${DomainAdminUserName}"
+          $adminPassword = "${DomainAdminPassword}"
+          $user1Name = "${User1Name}"
+          $user1Password = "${User1Password}"
+          $user2Name = "${User2Name}"
+          $user2Password = "${User2Password}"
+          # Join the instance to the domain
+          Add-Computer -DomainName $domainName -Credential (New-Object System.Management.Automation.PSCredential ($adminUserName, (ConvertTo-SecureString $adminPassword -AsPlainText -Force))) -Restart
+          # Install Failover Clustering
+          Install-WindowsFeature Failover-Clustering -IncludeManagementTools
+          </powershell>
+
+  WSFCNode2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0c55b159cbfafe1f0 # Windows Server 2019 Base
+      InstanceType: t3.large
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServerNamePrefix}-WSFC2"
+      UserData:
+        Fn::Base64: !Sub |
+          <powershell>
+          $domainName = "${DomainName}"
+          $adminUserName = "${DomainAdminUserName}"
+          $adminPassword = "${DomainAdminPassword}"
+          $user1Name = "${User1Name}"
+          $user1Password = "${User1Password}"
+          $user2Name = "${User2Name}"
+          $user2Password = "${User2Password}"
+          # Join the instance to the domain
+          Add-Computer -DomainName $domainName -Credential (New-Object System.Management.Automation.PSCredential ($adminUserName, (ConvertTo-SecureString $adminPassword -AsPlainText -Force))) -Restart
+          # Install Failover Clustering
+          Install-WindowsFeature Failover-Clustering -IncludeManagementTools
+          </powershell>
+
+  WSFCCluster:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0c55b159cbfafe1f0 # Windows Server 2019 Base
+      InstanceType: t3.large
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServerNamePrefix}-WSFC"
+      UserData:
+        Fn::Base64: !Sub |
+          <powershell>
+          $domainName = "${DomainName}"
+          $adminUserName = "${DomainAdminUserName}"
+          $adminPassword = "${DomainAdminPassword}"
+          $user1Name = "${User1Name}"
+          $user1Password = "${User1Password}"
+          $user2Name = "${User2Name}"
+          $user2Password = "${User2Password}"
+          # Install Failover Clustering
+          Install-WindowsFeature Failover-Clustering -IncludeManagementTools
+          # Create the cluster
+          $nodeName1 = "${ServerNamePrefix}-WSFC1"
+          $nodeName2 = "${ServerNamePrefix}-WSFC2"
+          $clusterName = "${ServerNamePrefix}-Cluster"
+          New-Cluster -Name $clusterName -Node $nodeName1,$nodeName2 -NoStorage -StaticAddress "10.0.0.100" -Force -Credential (New-Object System.Management.Automation.PSCredential ($adminUserName, (ConvertTo-SecureString $adminPassword -AsPlainText -Force)))
+          # Add a file share witness
+          $witnessName = "${ServerNamePrefix}-Witness"
+          $witnessPath = "C:\\ClusterStorage\\Witness"
+          New-Item -ItemType Directory -Path $witnessPath -Force
+          Add-ClusterFileShareWitness -Name $clusterName -FileShareWitnessPath $witnessPath -WitnessDirectory $witnessName -Credential (New-Object System.Management.Automation.PSCredential ($adminUserName, (ConvertTo-SecureString $adminPassword -AsPlainText -Force)))
+          # Create a clustered role for the first application
+          $roleName1 = "${ServerNamePrefix}-App1"
+          Add-ClusterResource -Name $roleName1 -ResourceType "IP Address" -Group $clusterName -StaticAddress "10.0.0.101"
+          Add-ClusterResourceDependency -Resource $roleName1 -Dependency $witnessName
+          # Create a clustered role for the second application
+          $roleName2 = "${ServerNamePrefix}-App2"
+          Add-ClusterResource -Name $roleName2 -ResourceType "IP Address" -Group $clusterName -StaticAddress "10.0.0.102"
+          Add-ClusterResourceDependency -Resource $roleName2 -Dependency $witnessName
+          </powershell>
+
+Outputs:
+  DomainControllerPublicIP:
+    Description: "The public IP address of the domain controller."
+    Value: !GetAtt DomainController.PublicIp
+  DomainJoinedServerPrivateIP:
+    Description: "The private IP address of the domain-joined server."
+    Value: !GetAtt DomainJoinedServer.PrivateIp
+  WSFCNode1PrivateIP:
+    Description: "The private IP address of WSFC node 1."
+    Value: !GetAtt WSFCNode1.PrivateIp
+  WSFCNode2PrivateIP:
+    Description: "The private IP address of WSFC node 2."
+    Value: !GetAtt WSFCNode2.PrivateIp
+  ClusterName:
+    Description: "The name of the WSFC cluster."
+    Value: !Sub "${ServerNamePrefix}-Cluster"
+  App1IP:
+    Description: "The IP address of the first clustered role."
+    Value: !Sub "10.0.0.101"
+  App2IP:
+    Description: "The IP address of the second clustered role."
+    Value: !Sub "10.0.0.102"
+  DomainAdminUserName:
+    Description: "The username for the domain administrator account."
+    Value: !Ref DomainAdminUserName
+  DomainAdminPassword:
+    Description: "The password for the domain administrator account."
+    Value: !Ref DomainAdminPassword
+  User1Name:
+    Description: "The username for the first domain user."
+    Value: !Ref User1Name
+  User1Password:
+    Description: "The password for the first domain user."
+    Value: !Ref User1Password
+  User2Name:
+    Description: "The username for the second domain user."
+    Value: !Ref User2Name
+  User2Password:
+    Description: "The password for the second domain user."
+    Value: !Ref User2Password
