@@ -1,0 +1,316 @@
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: "Select the VPC where the instances will be launched"
+  SecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: "Select the security group for the instances"
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: "Select the key pair for the instances"
+  DomainControllerName:
+    Type: String
+    Description: "Enter the name for the Domain Controller instance"
+    AllowedPattern: "^[a-zA-Z0-9]*$"
+  CollectorServerName:
+    Type: String
+    Description: "Enter the name for the Collector server instance"
+    AllowedPattern: "^[a-zA-Z0-9]*$"
+  DomainName:
+    Type: String
+    Description: The name of the Active Directory domain
+    AllowedPattern: ^[a-zA-Z0-9\-\.]*$
+  DomainAdmin1:
+    Type: String
+    Description: The username for the first domain admin
+    AllowedPattern: ^[a-zA-Z0-9_.]+$
+    ConstraintDescription: Only alphanumeric characters, underscores, and periods are allowed
+  DomainAdmin1Password:
+    Type: String
+    Description: "Enter the password for domain administrator user 1"
+    NoEcho: true
+  DomainAdmin2:
+    Type: String
+    Description: The username for the second domain admin
+    AllowedPattern: ^[a-zA-Z0-9_.]+$
+    ConstraintDescription: Only alphanumeric characters, underscores, and periods are allowed
+  DomainAdmin2Password:
+    Type: String
+    Description: "Enter the password for domain administrator user 2"
+    NoEcho: true
+  DomainAdmin3:
+    Type: String
+    Description: The username for the third domain admin
+    AllowedPattern: ^[a-zA-Z0-9_.]+$
+    ConstraintDescription: Only alphanumeric characters, underscores, and periods are allowed
+  DomainAdmin3Password:
+    Type: String
+    Description: "Enter the password for domain administrator user 3"
+    NoEcho: true
+  MSSQLInstanceName:
+    Type: String
+    Description: "Enter the name for the MSSQL instance"
+    AllowedPattern: "^[a-zA-Z0-9]*$"
+  MSSQLPassword:
+    Type: String
+    Description: "Enter the password for the sa user in SQL Server"
+    NoEcho: true
+  WSFCName:
+    Type: String
+    Description: "Enter the name for the Windows Server Failover Cluster"
+    AllowedPattern: "^[a-zA-Z0-9]*$"
+  WSFCWitnessInstance:
+    Type: String
+    Description: "Enter the name for the witness instance"
+    AllowedPattern: "^[a-zA-Z0-9]*$"
+  WSFCAdmin:
+    Type: String
+    Description: "Enter the username for the WSFC administrator"
+    AllowedPattern: ^[a-zA-Z0-9_.]+$
+    ConstraintDescription: "Only alphanumeric characters, underscores, and periods are allowed"
+  WSFCAdminPassword:
+    Type: String
+    Description: "Enter the password for the WSFC administrator"
+    NoEcho: true
+
+Resources:
+  DomainControllerInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      DisableApiTermination: true
+      CreditSpecification:
+        CPUCredits: standard
+      InstanceType: t3.small
+      ImageId: ami-0dc21fb273a648e34
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+        - !Ref SecurityGroupId
+      UserData:
+        Fn::Base64: !Sub |
+          <powershell>
+          # Install Active Directory Domain Services
+          Install-WindowsFeature AD-Domain-Services -IncludeManagementTools
+
+          # Configure static IP address
+          $IP = (Get-NetAdapter | Where-Object {$_.Name -eq 'Ethernet'}).IPv4Address.IPAddress
+          New-NetIPAddress -IPAddress $IP -InterfaceAlias 'Ethernet' -PrefixLength 24 -DefaultGateway '10.0.0.1'
+
+          # Create new domain
+          Install-ADDSForest -DomainName ${DomainName} -DomainNetbiosName (Get-NetAdapter | Where-Object {$_.Name -eq 'Ethernet'}).IPv4Address.IPAddress.Replace(".", "") -DomainMode WinThreshold -ForestMode WinThreshold
+
+          # Create domain administrator users
+          $secpasswd1 = ConvertTo-SecureString ${DomainAdmin1Password} -AsPlainText -Force
+          $secpasswd2 = ConvertTo-SecureString ${DomainAdmin2Password} -AsPlainText -Force
+          $secpasswd3 = ConvertTo-SecureString ${DomainAdmin3Password} -AsPlainText -Force
+          $domainCreds = New-Object System.Management.Automation.PSCredential ("${DomainName}\Administrator", (ConvertTo-SecureString -String "${DomainAdmin1Password}" -Force -AsPlainText))
+          New-ADUser -Name ${DomainAdmin1} -AccountPassword $secpasswd1 -Enabled $true -PasswordNeverExpires $true -CannotChangePassword $false -Path "CN=Users,DC=${DomainName}" -Credential $domainCreds -DisplayName ${DomainAdmin1}
+          New-ADUser -Name ${DomainAdmin2} -AccountPassword $secpasswd2 -Enabled $true -PasswordNeverExpires $true -CannotChangePassword $false -Path "CN=Users,DC=${DomainName}" -Credential $domainCreds -DisplayName ${DomainAdmin2}
+          New-ADUser -Name ${DomainAdmin3} -AccountPassword $secpasswd3 -Enabled $true -PasswordNeverExpires $true -CannotChangePassword $false -Path "CN=Users,DC=${DomainName}" -Credential $domainCreds -DisplayName ${DomainAdmin3}
+
+          # Create DNS forwarders
+          Set-DnsServerForwarder -IPAddress 8.8.8.8, 8.8.4.4
+
+          # Install Windows Failover Clustering
+          Install-WindowsFeature Failover-Clustering -IncludeManagementTools
+
+          # Configure WSFC
+          New-Cluster -Name ${WSFCName} -Node ${DomainControllerName} -StaticAddress ${WSFCWitnessInstance}
+
+          # Create clustered role
+          Add-ClusteredRole -Name ${MSSQLInstanceName} -Cluster ${WSFCName} -Node ${MSSQLInstanceName}
+
+          # Restart computer
+          Restart-Computer -Force
+          </powershell>
+      Tags:
+      - Key: Name
+        Value: !Sub "${DomainControllerName}.${DomainName}"
+
+  CollectorInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: DomainControllerInstance
+    Properties:
+      DisableApiTermination: true
+      CreditSpecification:
+        CPUCredits: standard
+      InstanceType: t3.small
+      ImageId: ami-0dc21fb273a648e34
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+        - !Ref SecurityGroupId
+      UserData:
+        Fn::Base64: !Sub |
+          <powershell>
+          # Configure static IP address
+          $IP = (Get-NetAdapter | Where-Object {$_.Name -eq 'Ethernet'}).IPv4Address.IPAddress
+          New-NetIPAddress -IPAddress $IP -InterfaceAlias 'Ethernet' -PrefixLength 24 -DefaultGateway '10.0.0.1'
+
+          # Join domain
+          $domainAdminCreds = New-Object System.Management.Automation.PSCredential ("${DomainAdmin1}@${DomainName}", (ConvertTo-SecureString -String "${DomainAdmin1Password}" -Force -AsPlainText))
+          Add-Computer -DomainName ${DomainName} -Credential $domainAdminCreds
+
+          # Install Failover Clustering feature
+          Install-WindowsFeature Failover-Clustering -IncludeManagementTools
+
+          # Configure firewall rules for cluster communication
+          New-NetFirewallRule -DisplayName "Cluster" -Direction Inbound -Protocol TCP -LocalPort "3343-3350" -Action Allow
+          New-NetFirewallRule -DisplayName "Cluster" -Direction Inbound -Protocol UDP -LocalPort "3343-3350" -Action Allow
+
+          # Add CollectorInstance to WSFC
+          Add-ClusterNode -Cluster ${WSFCName} -Name ${CollectorServerName}
+
+          # Restart computer
+          Restart-Computer -Force
+          </powershell>
+      Tags:
+      - Key: Name
+        Value: !Sub "${CollectorServerName}.${DomainName}"
+
+  MSSQLInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: CollectorInstance
+    Properties:
+      DisableApiTermination: true
+      CreditSpecification:
+        CPUCredits: standard
+      InstanceType: t3.small
+      ImageId: ami-0dc21fb273a648e34
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+        - !Ref SecurityGroupId
+      UserData:
+        Fn::Base64: !Sub |
+          <powershell>
+          # Configure static IP address
+          $IP = (Get-NetAdapter | Where-Object {$_.Name -eq 'Ethernet'}).IPv4Address.IPAddress
+          New-NetIPAddress -IPAddress $IP -InterfaceAlias 'Ethernet' -PrefixLength 24 -DefaultGateway '10.0.0.1'
+
+          # Join domain
+          $domainCreds = New-Object System.Management.Automation.PSCredential ("${DomainName}\Administrator", (ConvertTo-SecureString -String "${DomainAdmin1Password}" -Force -AsPlainText))
+          Add-Computer -DomainName ${DomainName} -Credential $domainCreds
+
+          # Install SQL Server 2022 Express
+          $url = 'https://go.microsoft.com/fwlink/?linkid=2164167&clcid=0x409'
+          $path = "$($Env:SystemDrive)\SQLServer2022-SSEI-Expr.exe"
+          Invoke-WebRequest -Uri $url -OutFile $path
+          $installArgs = @('/Action=Install', '/Features=SQLENGINE', '/InstanceName=MSSQLSERVER', '/SqlSysAdminAccounts=BUILTIN\Administrators', "/SecurityMode=SQL", "/SAPWD=$($MSSQLPassword)", '/IAcceptSqlServerLicenseTerms', '/quiet', '/norestart')
+          Start-Process -FilePath $path -ArgumentList $installArgs -Wait -NoNewWindow
+
+          # Configure firewall
+          New-NetFirewallRule -DisplayName "SQL Server" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 1433
+
+          # Install SQL Server Management Studio (SSMS)
+          $url = 'https://go.microsoft.com/fwlink/?linkid=2155216'
+          $path = "$($Env:SystemDrive)\SSMS-Setup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $path
+          $installArgs = @('/install', '/quiet', '/norestart')
+          Start-Process -FilePath $path -ArgumentList $installArgs -Wait -NoNewWindow
+
+          # Install Failover Clustering feature
+          Install-WindowsFeature Failover-Clustering -IncludeManagementTools
+
+          # Configure firewall rules for cluster communication
+          New-NetFirewallRule -DisplayName "Cluster" -Direction Inbound -Protocol TCP -LocalPort "3343-3350" -Action Allow
+          New-NetFirewallRule -DisplayName "Cluster" -Direction Inbound -Protocol UDP -LocalPort "3343-3350" -Action Allow
+
+          # Join the WSFC
+          $wsfcCreds = New-Object System.Management.Automation.PSCredential ("${DomainName}\${WSFCAdmin}", (ConvertTo-SecureString -String "${WSFCAdminPassword}" -Force -AsPlainText))
+          Add-ClusterNode -Cluster ${WSFCName} -Credential $wsfcCreds
+
+          # Add MSSQLInstance as clustered role
+          Add-ClusteredRole -Name ${MSSQLInstanceName} -Cluster ${WSFCName} -Node ${CollectorServerName}
+
+          # Restart computer
+          Restart-Computer -Force
+          </powershell>
+      Tags:
+      - Key: Name
+        Value: !Sub "${MSSQLInstanceName}.${DomainName}"
+
+  WSFCWitnessInstance:
+      Type: AWS::EC2::Instance
+      DependsOn: MSSQLInstance
+      Properties:
+        DisableApiTermination: true
+        CreditSpecification:
+          CPUCredits: standard
+        InstanceType: t3.small
+        ImageId: ami-0dc21fb273a648e34
+        KeyName: !Ref KeyName
+        SecurityGroupIds:
+          - !Ref SecurityGroupId
+        UserData:
+          Fn::Base64: !Sub |
+            <powershell>
+            # Configure static IP address
+            $IP = (Get-NetAdapter | Where-Object {$_.Name -eq 'Ethernet'}).IPv4Address.IPAddress
+            New-NetIPAddress -IPAddress $IP -InterfaceAlias 'Ethernet' -PrefixLength 24 -DefaultGateway '10.0.0.1'
+
+            # Join domain
+            $domainCreds = New-Object System.Management.Automation.PSCredential ("${DomainName}\Administrator", (ConvertTo-SecureString -String "${DomainAdmin1Password}" -Force -AsPlainText))
+            Add-Computer -DomainName ${DomainName} -Credential $domainCreds
+
+            # Install Failover Clustering feature
+            Install-WindowsFeature Failover-Clustering -IncludeManagementTools
+
+            # Configure firewall rules for cluster communication
+            New-NetFirewallRule -DisplayName "Cluster" -Direction Inbound -Protocol TCP -LocalPort "3343-3350" -Action Allow
+            New-NetFirewallRule -DisplayName "Cluster" -Direction Inbound -Protocol UDP -LocalPort "3343-3350" -Action Allow
+
+            # Join the WSFC
+            $wsfcCreds = New-Object System.Management.Automation.PSCredential ("${DomainName}\${WSFCAdmin}", (ConvertTo-SecureString -String "${WSFCAdminPassword}" -Force -AsPlainText))
+            Add-ClusterNode -Cluster ${WSFCName} -Credential $wsfcCreds
+
+            # Configure the witness disk
+            Get-Disk | Where-Object {$_.Number -eq 2} | Initialize-Disk -PartitionStyle MBR -PassThru | New-Partition -AssignDriveLetter -UseMaximumSize | Format-Volume -FileSystem NTFS -NewFileSystemLabel "Witness" -Confirm:$false
+
+            # Set up the file share witness
+            $witnessPath = "C:\Witness"
+            New-Item -ItemType Directory -Path $witnessPath
+            $acl = Get-Acl $witnessPath
+            $ar = New-Object System.Security.AccessControl.FileSystemAccessRule("Everyone","FullControl","Allow")
+            $acl.SetAccessRule($ar)
+            Set-Acl $witnessPath $acl
+            Set-ClusterQuorum -FileShareWitness "\\${WSFCWitnessInstance}\Witness" -Credential $wsfcCreds
+
+            # Restart computer
+            Restart-Computer -Force
+            </powershell>
+        Tags:
+        - Key: Name
+          Value: !Sub "${WSFCWitnessInstance}.${DomainName}"
+
+Outputs:
+  DomainControllerPublicIP:
+    Value: !GetAtt DomainControllerInstance.PublicIp
+  DomainControllerPrivateIP:
+    Value: !GetAtt DomainControllerInstance.PrivateIp
+  DomainControllerInstanceId:
+    Value: !Ref DomainControllerInstance
+
+  CollectorPublicIP:
+    Value: !GetAtt CollectorInstance.PublicIp
+    Description: The public IP address of the collector instance
+  CollectorPrivateIP:
+    Value: !GetAtt CollectorInstance.PrivateIp
+    Description: The private IP address of the collector instance
+  CollectorInstanceId:
+    Value: !Ref CollectorInstance
+
+  MSSQLPublicIP:
+    Value: !GetAtt MSSQLInstance.PublicIp
+    Description: The public IP address of the SQL Server instance
+  MSSQLPrivateIP:
+    Value: !GetAtt MSSQLInstance.PrivateIp
+    Description: The private IP address of the SQL Server instance
+  MSSQLInstanceId:
+    Value: !Ref MSSQLInstance
+    
+  WSFCWitnessPublicIP:
+    Value: !GetAtt WSFCWitnessInstance.PublicIp
+    Description: The public IP address of the WSFC witness instance
+  WSFCWitnessPrivateIP:
+    Value: !GetAtt WSFCWitnessInstance.PrivateIp
+    Description: The private IP address of the WSFC witness instance
+  WSFCWitnessInstanceId:
+    Value: !Ref WSFCWitnessInstance
