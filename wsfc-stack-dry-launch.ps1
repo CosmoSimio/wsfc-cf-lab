@@ -22,10 +22,7 @@ $params = "VpcId=vpc-12345678", `
           "DomainAdmin3Password=Password789", `
           "MSSQLInstanceName=ec2winsql1", `
           "MSSQLPassword=MyPassw0rd", `
-          "WSFCName=cluster01", `
-          "WSFCWitnessInstance=ec2wsfcwit1", `
-          "WSFCAdmin=svc_wsfcadmin", `
-          "WSFCAdminPassword=MyPassw0rd"
+          "ClusteredRoleName=cluster01"
 
 # Deploy the stack
 aws cloudformation deploy `
