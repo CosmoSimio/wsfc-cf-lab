@@ -18,38 +18,38 @@ Parameters:
     AllowedPattern: "^[a-zA-Z0-9]*$"
   DomainName:
     Type: String
-    Description: The name of the Active Directory domain
+    Description: The name of your Active Directory domain
     AllowedPattern: ^[a-zA-Z0-9\-\.]*$
   DomainAdmin1:
     Type: String
-    Description: The username for the first domain admin
+    Description: Enter your personal domain administrator username (e.g firstname.lastname)
     AllowedPattern: ^[a-zA-Z0-9_.]+$
     ConstraintDescription: Only alphanumeric characters, underscores, and periods are allowed
   DomainAdmin1Password:
     Type: String
-    Description: "Enter the password for domain administrator user 1"
+    Description: "Enter your personal domain administrator password"
     NoEcho: true
   DomainAdmin2:
     Type: String
-    Description: The username for the second domain admin
+    Description: Enter the username for the collector services local administrator (e.g svc_lacoll)
     AllowedPattern: ^[a-zA-Z0-9_.]+$
     ConstraintDescription: Only alphanumeric characters, underscores, and periods are allowed
   DomainAdmin2Password:
     Type: String
-    Description: "Enter the password for domain administrator user 2"
+    Description: "Enter the password for the collector services local administrator (e.g svc_lacoll)"
     NoEcho: true
   DomainAdmin3:
     Type: String
-    Description: The username for the third domain admin
+    Description: Enter the username for the collector services domain administrator (e.g svc_dacoll)
     AllowedPattern: ^[a-zA-Z0-9_.]+$
     ConstraintDescription: Only alphanumeric characters, underscores, and periods are allowed
   DomainAdmin3Password:
     Type: String
-    Description: "Enter the password for domain administrator user 3"
+    Description: "Enter the password for collector services domain administrator (e.g svc_dacoll)"
     NoEcho: true
   MSSQLInstanceName:
     Type: String
-    Description: "Enter the name for the MSSQL instance"
+    Description: "Enter the name for the MSSQL server instance"
     AllowedPattern: "^[a-zA-Z0-9]*$"
   MSSQLPassword:
     Type: String
@@ -57,7 +57,7 @@ Parameters:
     NoEcho: true
   ClusteredRoleName:
     Type: String
-    Description: "Enter the name for the Windows Server Failover Cluster"
+    Description: "Enter the name for the Windows Server Failover Cluster (e.g cluster01)"
     AllowedPattern: "^[a-zA-Z0-9]*$"
 
 Resources:
