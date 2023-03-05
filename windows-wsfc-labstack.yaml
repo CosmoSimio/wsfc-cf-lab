@@ -177,18 +177,22 @@ Resources:
           Add-Computer -DomainName ${DomainName} -Credential $domainCreds
 
           # Install SQL Server 2022 Express
-          $url = 'https://go.microsoft.com/fwlink/?linkid=2164167&clcid=0x409'
-          $path = "$($Env:SystemDrive)\SQLServer2022-SSEI-Expr.exe"
+          $url = 'https://download.microsoft.com/download/5/1/4/5145fe04-4d30-4b85-b0d1-39533663a2f1/SQL2022-SSEI-Expr.exe'
+          $installPath = Join-Path $env:SystemDrive 'SQLServer'
+          New-Item -ItemType Directory -Path $installPath -Force | Out-Null
+          $path = Join-Path $installPath 'SQLServer2022-SSEI-Expr.exe'
           Invoke-WebRequest -Uri $url -OutFile $path
-          $installArgs = @('/Action=Install', '/Features=SQLENGINE', '/InstanceName=MSSQLSERVER', '/SqlSysAdminAccounts=BUILTIN\Administrators', "/SecurityMode=SQL", "/SAPWD=$($MSSQLPassword)", '/IAcceptSqlServerLicenseTerms', '/quiet', '/norestart')
+          $installArgs = @('/Action=Install', '/Features=SQLENGINE', '/InstanceName=MSSQLSERVER', '/SqlSysAdminAccounts=BUILTIN\Administrators', '/SecurityMode=SQL', '/SAPWD=' + ${MSSQLPassword}, '/IAcceptSqlServerLicenseTerms', '/quiet', '/norestart')
           Start-Process -FilePath $path -ArgumentList $installArgs -Wait -NoNewWindow
 
           # Configure firewall
           New-NetFirewallRule -DisplayName "SQL Server" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 1433
 
           # Install SQL Server Management Studio (SSMS)
-          $url = 'https://go.microsoft.com/fwlink/?linkid=2155216'
-          $path = "$($Env:SystemDrive)\SSMS-Setup.exe"
+          $url = 'https://aka.ms/ssmsfullsetup'
+          $installPath = Join-Path $env:SystemDrive 'SSMS'
+          New-Item -ItemType Directory -Path $installPath -Force | Out-Null
+          $path = Join-Path $installPath 'SSMS-Setup-ENU.exe'
           Invoke-WebRequest -Uri $url -OutFile $path
           $installArgs = @('/install', '/quiet', '/norestart')
           Start-Process -FilePath $path -ArgumentList $installArgs -Wait -NoNewWindow
