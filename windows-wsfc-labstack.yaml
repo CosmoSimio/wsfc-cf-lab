@@ -208,7 +208,7 @@ Resources:
           New-Cluster -Name ${ClusteredRoleName} -Node ${DomainControllerName},${MSSQLInstanceName} -StaticAddress $WSFCIPAddress -NoStorage
 
           # Create a disk witness
-          New-SmbShare -Name "MSSQLServerWFCWitness" -Path "$Env:SystemDrive\MSSQLServerWFCWitness" -FullAccess "Everyone"
+          New-SmbShare -Name "MSSQLServerWFCWitness" -Path "$($Env:SystemDrive)\MSSQLServerWFCWitness" -FullAccess "Everyone"
           $diskWitness = "${DomainControllerName}.${DomainName}"
           $diskWitnessPath = "\\$($diskWitness)\MSSQLServerWFCWitness"
           Set-ClusterQuorum -FileShareWitness $diskWitnessPath -Cluster $ClusteredRoleName
