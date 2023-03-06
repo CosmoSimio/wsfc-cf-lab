@@ -92,7 +92,8 @@ Resources:
       SecurityGroupIds:
         - !Ref SecurityGroupId
       UserData:
-        Fn::Base64: !Sub |
+        Fn::Base64: 
+          !Sub |
           <powershell>
           # Install Active Directory Domain Services
           Install-WindowsFeature AD-Domain-Services -IncludeManagementTools
@@ -151,7 +152,8 @@ Resources:
       SecurityGroupIds:
         - !Ref SecurityGroupId
       UserData:
-        Fn::Base64: !Sub |
+        Fn::Base64: 
+          !Sub |
           <powershell>
           # Configure static IP address
           $IP = (Get-NetAdapter | Where-Object {$_.Name -eq 'Ethernet'}).IPv4Address.IPAddress
@@ -190,7 +192,8 @@ Resources:
       SecurityGroupIds:
         - !Ref SecurityGroupId
       UserData:
-        Fn::Base64: !Sub |
+        Fn::Base64: 
+          !Sub |
           <powershell>
           # Configure static IP address
           $IP = (Get-NetAdapter | Where-Object {$_.Name -eq 'Ethernet'}).IPv4Address.IPAddress
