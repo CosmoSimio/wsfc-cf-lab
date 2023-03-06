@@ -23,6 +23,8 @@ $domainAdmin3Password = Read-Host "Enter the password for domain administrator u
 $mssqlInstanceName = Read-Host "Enter a name for the MSSQL instance"
 $mssqlPassword = Read-Host "Enter the password for the sa user in SQL Server" -AsSecureString
 $ClusteredRoleName = Read-Host "Enter a name for the Windows Server Failover Cluster"
+$DomainNetbiosName = Read-Host "Enter the NetBIOS name for the Active Directory domain"
+$SafeModeAdministratorPassword = Read-Host "Enter the password for the Safe Mode Administrator user" -AsSecureString
 
 # Deploy the stack with user input parameters
 aws cloudformation deploy `
@@ -44,7 +46,7 @@ aws cloudformation deploy `
         "MSSQLInstanceName=$mssqlInstanceName" `
         "MSSQLPassword=$mssqlPassword" `
         "ClusteredRoleName=$ClusteredRoleName" `
-        "WSFCAdmin=$wsfcAdmin" `
-        "WSFCAdminPassword=$wsfcAdminPassword" `
+        "DomainNetbiosName=$DomainNetbiosName" `
+        "SafeModeAdministratorPassword=$SafeModeAdministratorPassword" `
     --no-execute-changeset `
     --region $region

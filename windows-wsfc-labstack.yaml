@@ -20,6 +20,20 @@ Parameters:
     Type: String
     Description: The name of your Active Directory domain
     AllowedPattern: ^[a-zA-Z0-9\-\.]*$
+  DomainNetbiosName:
+    Description: The NetBIOS name of the domain to create
+    Type: String
+    MinLength: '1'
+    MaxLength: '15'
+    AllowedPattern: '[a-zA-Z0-9_-]+'
+    ConstraintDescription: 'Must contain only alphanumeric characters, hyphens, and underscores, and must be between 1 and 15 characters in length'
+  SafeModeAdministratorPassword:
+    Description: Password for the DSRM Administrator account used to perform restore operations
+    Type: String
+    NoEcho: True
+    MinLength: '8'
+    MaxLength: '64'
+    ConstraintDescription: The password must be between 8 and 64 characters in length.
   DomainAdmin1:
     Type: String
     Description: Enter your personal domain administrator username (e.g firstname.lastname)
@@ -88,7 +102,17 @@ Resources:
           New-NetIPAddress -IPAddress $IP -InterfaceAlias 'Ethernet' -PrefixLength 24 -DefaultGateway '10.0.0.1'
 
           # Create new domain
-          Install-ADDSForest -DomainName ${DomainName} -DomainNetbiosName (Get-NetAdapter | Where-Object {$_.Name -eq 'Ethernet'}).IPv4Address.IPAddress.Replace(".", "") -DomainMode WinThreshold -ForestMode WinThreshold
+            Install-ADDSForest `
+            -DomainName ${DomainName} `
+            -CreateDnsDelegation:$false `
+            -DatabasePath "%SYSTEMROOT%\NTDS" `
+            -DomainMode "WinThreshold" `
+            -DomainNetbiosName ${DomainNetbiosName} `
+            -ForestMode "WinThreshold" `
+            -InstallDns:$true `
+            -LogPath "C:\Windows\NTDS" `
+            -SysvolPath "%SYSTEMROOT%\SYSVOL" `
+            -Force:$true
 
           # Create domain administrator users
           $secpasswd1 = ConvertTo-SecureString ${DomainAdmin1Password} -AsPlainText -Force
@@ -173,7 +197,7 @@ Resources:
           New-NetIPAddress -IPAddress $IP -InterfaceAlias 'Ethernet' -PrefixLength 24 -DefaultGateway '10.0.0.1'
 
           # Join domain
-          $domainCreds = New-Object System.Management.Automation.PSCredential ("${DomainName}\Administrator", (ConvertTo-SecureString -String "${DomainAdmin1Password}" -Force -AsPlainText))
+          $domainCreds = New-Object System.Management.Automation.PSCredential ("${DomainName}\${DomainAdmin1}", (ConvertTo-SecureString -String "${DomainAdmin1Password}" -Force -AsPlainText))
           Add-Computer -DomainName ${DomainName} -Credential $domainCreds
 
           # Install SQL Server 2022 Express
